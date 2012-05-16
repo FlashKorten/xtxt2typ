@@ -1,0 +1,151 @@
+#!/usr/bin/ruby1.8 -w
+
+########################################################################
+#
+# xtxt2typ  -  Version 0.1 (but it works!)
+# ---------
+# Conversion script from .txt to .typ (gtypist lesson format)
+#
+# Written by Sebastian Korten
+# eMail: Sebastian.Korten at gmail.com
+#
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+########################################################################
+
+$options = {
+  :softlimit => 20,
+  :limit => 25,
+  :delimiter => '__chapter__',
+  :pages => 5,
+  :question => "Go on...? [Y/N]",
+  :mode => 'S'
+}
+
+def parse_options
+  while ARGV[0] =~ /^-/
+    par = ARGV.shift
+    case
+    when par == "--"
+      return
+    when ((par =='-p')||(par=='--pages'))
+      $options[:pages] = ARGV.shift.to_i
+    when ((par =='-d')||(par=='--delimiter'))
+      $options[:delimiter] = ARGV.shift
+    when ((par =='-s')||(par=='--softlimit'))
+      $options[:softlimit] = ARGV.shift.to_i
+    when ((par =='-l')||(par=='--limit'))
+      $options[:limit] = ARGV.shift.to_i
+    when ((par =='-q')||(par=='--question'))
+      $options[:question] = ARGV.shift
+    when ((par =='-i')||(par=='--insertmode'))
+      $options[:mode] = 'D'
+    when ((par =='-h')||(par=='--help'))
+      print USAGE
+      exit
+    end
+  end
+end
+
+USAGE =<<ENDOFUSAGE
+
+Usage: xtxt2typ [options] file01.xtxt [file02.xtxt ...]
+
+Options:            [default]         description
+----------------------------------------------------------------------------
+  -d / --delimiter  [__chapter__]     chapter delimiter (start of line)
+  -p / --pages      [5]               number of pages per lesson
+  -s / --softlimit  [20]              pagebreak at empty line after # lines
+  -l / --limit      [25]              pagebreak forced after # lines
+  -q / --question   [Go on...? [Y/N]] question for next lesson
+  -i / --insertmode [overwrite]       switch from overwrite to insertmode
+  -h / --help                         display this text
+
+ENDOFUSAGE
+
+
+print USAGE if (ARGV.size == 0)
+
+parse_options()
+
+ARGV.each do |filename|
+  next unless filename =~ /.xtxt$/
+    file = File.new(filename, 'r')
+  lines = file.readlines()
+  file.close
+  title = lines.shift.gsub(/^\s*(.*)\s*/, '\1').chomp
+
+  chapter_counter = -1
+  chapter = [""]
+  chapter_title = [""]
+  jump_table = "\n# jump-table\n"
+  menu = "\n*:MENU\nM:\"#{title}\"\n"
+
+  page_number = 0
+  page_count = 0
+  line_counter = 0
+  lesson_number = 1
+  outlines = "G:MENU\n\n"
+
+  lines.each do |line|
+    line.chomp!
+    next if ((line_counter == 0)||(line_counter == $options[:limit])) &&
+            (line =~ /^\s*$/)
+    if ((line_counter >= $options[:softlimit]) && (line =~ /^\s*$/))
+      line_counter = $options[:limit]
+      next
+    end
+    line_counter += 1
+    if line =~ /^#{$options[:delimiter]}/
+      chapter_counter += 1
+      line_counter = $options[:limit]
+      chapter_title[chapter_counter] = line.gsub(/^#{$options[:delimiter]}\s*/, '')
+      chapter[chapter_counter] = ""
+    elsif (line_counter >= $options[:limit])
+      line_counter = 0
+      page_number += 1
+      page_count += 1
+      if ((page_count-1) == $options[:pages]) ||
+          (chapter[chapter_counter] == "")
+        if (page_number > 1)
+          chapter[chapter_counter] += "G:E_#{page_number-1}\n"
+          jump_table += "*:E_#{page_number-1}\n" +
+                        "Q: #{$options[:question]}\n" +
+                        "N:MENU\nG:S_#{page_number}\n"
+        end
+        page_count = 1
+        chapter[chapter_counter] += "*:S_#{page_number}\n" +
+                                "B: #{title} - #{chapter_title[chapter_counter]}\n"
+        menu += " :S_#{page_number} \"#{chapter_title[chapter_counter]}" +
+                " - Page: #{page_number}\"\n"
+      end
+      chapter[chapter_counter] += "I:(#{page_number})\n#{$options[:mode]}:#{line}\n"
+    else
+      chapter[chapter_counter] += " :" + line + "\n"
+    end
+  end
+
+
+  outfile = File.new(filename.gsub(/.xtxt$/, ".typ"), 'w')
+
+  outfile.puts "G:MENU\n"
+
+  chapter.each do |text|
+    outfile.puts text
+  end
+
+  outfile.puts jump_table + menu
+  outfile.close
+end
